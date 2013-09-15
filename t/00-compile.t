@@ -1,44 +1,45 @@
-#!perl
-
 use strict;
 use warnings;
 
-use Test::More;
-use File::Find;
-use File::Temp qw{ tempdir };
+# this test was generated with Dist::Zilla::Plugin::Test::Compile 2.030
 
-my @modules;
-find(
-  sub {
-    return if $File::Find::name !~ /\.pm\z/;
-    my $found = $File::Find::name;
-    $found =~ s{^lib/}{};
-    $found =~ s{[/\\]}{::}g;
-    $found =~ s/\.pm$//;
-    # nothing to skip
-    push @modules, $found;
-  },
-  'lib',
+use Test::More 0.94 tests => 2 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+
+
+
+my @module_files = (
+    'Dist/Zilla/Plugin/NoTabsTests.pm',
+    'Dist/Zilla/Plugin/Test/NoTabs.pm'
 );
 
-my @scripts = glob "bin/*";
 
-plan tests => scalar(@modules) + scalar(@scripts);
 
+# no fake home requested
+
+use IPC::Open3;
+use IO::Handle;
+
+my @warnings;
+for my $lib (@module_files)
 {
-    # fake home for cpan-testers
-    # no fake requested ## local $ENV{HOME} = tempdir( CLEANUP => 1 );
+    # see L<perlfaq8/How can I capture STDERR from an external command?>
+    my $stdin = '';     # converted to a gensym by open3
+    my $stderr = IO::Handle->new;
 
-    is( qx{ $^X -Ilib -e "use $_; print '$_ ok'" }, "$_ ok", "$_ loaded ok" )
-        for sort @modules;
+    my $pid = open3($stdin, '>&STDERR', $stderr, qq{$^X -Mblib -e"require q[$lib]"});
+    binmode $stderr, ':crlf' if $^O; # eq 'MSWin32';
+    waitpid($pid, 0);
+    is($? >> 8, 0, "$lib loaded ok");
 
-    SKIP: {
-        eval "use Test::Script; 1;";
-        skip "Test::Script needed to test script compilation", scalar(@scripts) if $@;
-        foreach my $file ( @scripts ) {
-            my $script = $file;
-            $script =~ s!.*/!!;
-            script_compiles_ok( $file, "$script script compiles" );
-        }
+    if (my @_warnings = <$stderr>)
+    {
+        warn @_warnings;
+        push @warnings, @_warnings;
     }
 }
+
+
+
+is(scalar(@warnings), 0, 'no warnings found') if $ENV{AUTHOR_TESTING};
+
+BAIL_OUT("Compilation problems") if !Test::More->builder->is_passing;
